@@ -1,0 +1,295 @@
+/*
+ * main.c — Nuklear UI demo using the ui_infra building blocks.
+ *
+ * Four panels:
+ *   1. Main    — instructions
+ *   2. Settings — form that controls the plot look
+ *   3. Plot     — live sine‑wave chart
+ *   4. Hello   — classic popup
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <time.h>
+
+#define GLFW_INCLUDE_GLCOREARB
+#define GL_SILENCE_DEPRECATION
+#include <GLFW/glfw3.h>
+
+#define NK_INCLUDE_FIXED_TYPES
+#define NK_INCLUDE_STANDARD_IO
+#define NK_INCLUDE_STANDARD_VARARGS
+#define NK_INCLUDE_DEFAULT_ALLOCATOR
+#define NK_INCLUDE_VERTEX_BUFFER_OUTPUT
+#define NK_INCLUDE_FONT_BAKING
+#define NK_INCLUDE_DEFAULT_FONT
+#define NK_IMPLEMENTATION
+#define NK_GLFW_GL3_IMPLEMENTATION
+
+#include "nuklear.h"
+#include "nuklear_glfw_gl3.h"
+#include "ui_infra.h"
+
+#define WINDOW_WIDTH  1100
+#define WINDOW_HEIGHT  700
+
+#define MAX_VERTEX_BUFFER  (512 * 1024)
+#define MAX_ELEMENT_BUFFER (128 * 1024)
+
+/* ------------------------------------------------------------------ */
+/*  Application state                                                 */
+/* ------------------------------------------------------------------ */
+
+/* Shared settings modified by the Settings form */
+static nk_bool            g_custom_color = nk_false;  /* use colour picker */
+static struct nk_colorf   g_line_col     = {0.0f, 0.47f, 0.86f, 1.0f};
+static int                g_plot_speed   = 4;          /* sine frequency multiplier */
+
+static const char *g_combo_items[] = { "Lines", "Columns" };
+static int          g_combo_sel    = 0;   /* 0 = NK_CHART_LINES, 1 = NK_CHART_COLUMN */
+
+static ui_plot       g_plot;
+static ui_panel     *g_panels = NULL;          /* master panel list        */
+static ui_form       g_settings_form;
+
+static nk_bool g_panel_visible = nk_false;
+
+static double g_time = 0.0;
+
+/* ------------------------------------------------------------------ */
+/*  Panel callbacks                                                    */
+/* ------------------------------------------------------------------ */
+
+/* ---------- Main panel ---------- */
+static void draw_main(struct nk_context *ctx, ui_panel *panel)
+{
+    (void)panel;
+    nk_layout_row_dynamic(ctx, 30, 1);
+    nk_label(ctx, "Welcome to the Nuklear UI Infrastructure demo!", NK_TEXT_CENTERED);
+    nk_layout_row_dynamic(ctx, 20, 1);
+    nk_label(ctx, "Use the Settings panel to change the live plot below.", NK_TEXT_LEFT);
+    nk_layout_row_dynamic(ctx, 20, 1);
+    nk_label(ctx, "Panels are structs; forms are built declaratively.", NK_TEXT_LEFT);
+    nk_layout_row_static(ctx, 30, 140, 1);
+    if (nk_button_label(ctx, "Button"))
+        g_panel_visible = nk_true;
+}
+
+/* ---------- Settings panel ---------- */
+static void draw_settings(struct nk_context *ctx, ui_panel *panel)
+{
+    (void)panel;
+    ui_form_render(ctx, &g_settings_form);
+
+    /* Apply settings to the shared plot */
+    if (g_custom_color) {
+        g_plot.use_custom_colors = nk_true;
+        g_plot.line_color = nk_rgb((int)(g_line_col.r*255),
+                                   (int)(g_line_col.g*255),
+                                   (int)(g_line_col.b*255));
+    } else {
+        g_plot.use_custom_colors = nk_false;
+    }
+    g_plot.type = (g_combo_sel == 0) ? NK_CHART_LINES : NK_CHART_COLUMN;
+}
+
+/* ---------- Plot panel ---------- */
+static void draw_plot(struct nk_context *ctx, ui_panel *panel)
+{
+    (void)panel;
+    nk_layout_row_dynamic(ctx, 30, 1);
+    nk_label(ctx, g_plot.title, NK_TEXT_CENTERED);
+    nk_layout_row_dynamic(ctx, 200, 1);
+    ui_plot_render(ctx, &g_plot);
+    nk_layout_row_dynamic(ctx, 20, 1);
+    nk_labelf(ctx, NK_TEXT_RIGHT, "points: %d  |  range: [%.2f, %.2f]",
+              g_plot.count, g_plot.min_val, g_plot.max_val);
+}
+
+/* ---------- Hello popup ---------- */
+static nk_bool g_hello_visible = nk_false;
+
+static void draw_hello(struct nk_context *ctx, ui_panel *panel)
+{
+    (void)panel;
+    nk_layout_row_dynamic(ctx, 30, 1);
+    nk_label(ctx, "Hello, world!", NK_TEXT_CENTERED);
+    nk_layout_row_static(ctx, 35, 100, 1);
+    if (nk_button_label(ctx, "Close"))
+        g_hello_visible = nk_false;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Form button callbacks                                              */
+/* ------------------------------------------------------------------ */
+
+/* ---------- Panel tool ---------- */
+static void draw_panel(struct nk_context *ctx, ui_panel *pnl)
+{
+    (void)pnl;
+    if (nk_window_is_closed(ctx, "Panel"))
+        g_panel_visible = nk_false;
+    nk_layout_row_dynamic(ctx, 30, 1);
+    nk_label(ctx, "Hello, world!", NK_TEXT_CENTERED);
+}
+
+static void toggle_hello_cb(void *data)
+{
+    (void)data;
+    g_hello_visible = nk_true;
+}
+
+/* ------------------------------------------------------------------ */
+/*  GLFW error callback                                                */
+/* ------------------------------------------------------------------ */
+
+static void error_callback(int e, const char *d)
+{
+    fprintf(stderr, "GLFW Error %d: %s\n", e, d);
+}
+
+/* ------------------------------------------------------------------ */
+/*  main                                                               */
+/* ------------------------------------------------------------------ */
+
+int main(void)
+{
+    /* ---------- GLFW + Nuklear init ---------- */
+    struct nk_glfw nk_glfw = {0};
+    GLFWwindow *win = NULL;
+    int width = 0, height = 0;
+    struct nk_context *ctx;
+
+    glfwSetErrorCallback(error_callback);
+    if (!glfwInit()) {
+        fprintf(stderr, "Failed to init GLFW\n");
+        return EXIT_FAILURE;
+    }
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#ifdef __APPLE__
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#endif
+    win = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT,
+                           "Nuklear UI Infrastructure Demo", NULL, NULL);
+    if (!win) {
+        fprintf(stderr, "Failed to create window\n");
+        glfwTerminate();
+        return EXIT_FAILURE;
+    }
+    glfwMakeContextCurrent(win);
+    glfwGetFramebufferSize(win, &width, &height);
+    glViewport(0, 0, width, height);
+
+    ctx = nk_glfw3_init(&nk_glfw, win, NK_GLFW3_INSTALL_CALLBACKS);
+    {
+        struct nk_font_atlas *atlas;
+        nk_glfw3_font_stash_begin(&nk_glfw, &atlas);
+        nk_glfw3_font_stash_end(&nk_glfw);
+    }
+
+    /* ---------- Build panels ---------- */
+    static ui_panel main_panel, settings_panel, plot_panel, hello_panel;
+
+    ui_panel_init(&main_panel, "Main",
+                  nk_rect(10, 10, 300, 130),
+                  NK_WINDOW_BORDER | NK_WINDOW_TITLE |
+                  NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE,
+                  draw_main, NULL);
+
+    ui_panel_init(&settings_panel, "Settings",
+                  nk_rect(10, 150, 320, 480),
+                  NK_WINDOW_BORDER | NK_WINDOW_TITLE |
+                  NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE,
+                  draw_settings, NULL);
+
+    ui_panel_init(&plot_panel, "Plot",
+                  nk_rect(340, 10, 750, 320),
+                  NK_WINDOW_BORDER | NK_WINDOW_TITLE |
+                  NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE,
+                  draw_plot, NULL);
+
+    ui_panel_init(&hello_panel, "Hello",
+                  nk_rect(200, 200, 250, 120),
+                  NK_WINDOW_BORDER | NK_WINDOW_TITLE |
+                  NK_WINDOW_MOVABLE | NK_WINDOW_CLOSABLE,
+                  draw_hello, NULL);
+    hello_panel.visible = nk_false;   /* hidden until button is pressed */
+
+    /* ---------- Panel tool ---------- */
+    static ui_panel panel_panel;
+    float pw = 300;
+    float ph = (float)WINDOW_HEIGHT - 20;
+    ui_panel_init(&panel_panel, "Panel",
+                  nk_rect(WINDOW_WIDTH - pw - 10, 10, pw, ph),
+                  NK_WINDOW_BORDER | NK_WINDOW_TITLE |
+                  NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
+                  NK_WINDOW_CLOSABLE,
+                  draw_panel, NULL);
+    panel_panel.visible = nk_false;
+    ui_panel_add(&g_panels, &panel_panel);
+
+    /* Register all panels (order doesn't matter, render iterates list) */
+    ui_panel_add(&g_panels, &main_panel);
+    ui_panel_add(&g_panels, &settings_panel);
+    ui_panel_add(&g_panels, &plot_panel);
+    ui_panel_add(&g_panels, &hello_panel);
+
+    /* ---------- Build the Settings form ---------- */
+    ui_form_init(&g_settings_form);
+    ui_form_add_label(&g_settings_form, "Plot Settings");
+    ui_form_add_separator(&g_settings_form);
+    ui_form_add_checkbox(&g_settings_form, "Custom line colour", &g_custom_color);
+    ui_form_add_color(&g_settings_form, "Line colour", &g_line_col);
+    ui_form_add_combo(&g_settings_form, "Chart type",
+                       &g_combo_sel, g_combo_items,
+                       sizeof(g_combo_items)/sizeof(g_combo_items[0]));
+    ui_form_add_slider_int(&g_settings_form, "Sine speed",
+                           &g_plot_speed, 1, 10, 1);
+    ui_form_add_separator(&g_settings_form);
+    ui_form_add_button(&g_settings_form, "Show Hello popup",
+                        toggle_hello_cb, NULL);
+
+    /* ---------- Init the plot ---------- */
+    ui_plot_init(&g_plot, "Live Sine Wave", NK_CHART_LINES);
+
+    /* ---------- Main loop ---------- */
+    struct nk_colorf bg;
+    bg.r = 0.12f; bg.g = 0.16f; bg.b = 0.22f; bg.a = 1.0f;
+
+    while (!glfwWindowShouldClose(win))
+    {
+        glfwPollEvents();
+
+        /* Update plot with next sine sample */
+        g_time += 0.016;  /* ~60 fps */
+        float val = sinf((float)(g_time * g_plot_speed)) * 0.9f;
+        ui_plot_push(&g_plot, val);
+
+        /* Toggle hello panel visibility based on button */
+        hello_panel.visible = g_hello_visible;
+        panel_panel.visible = g_panel_visible;
+
+        /* Nuklear frame */
+        nk_glfw3_new_frame(&nk_glfw);
+
+        /* Render all panels */
+        ui_panels_render(ctx, g_panels);
+
+        /* OpenGL draw */
+        glfwGetFramebufferSize(win, &width, &height);
+        glViewport(0, 0, width, height);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glClearColor(bg.r, bg.g, bg.b, bg.a);
+        nk_glfw3_render(&nk_glfw, NK_ANTI_ALIASING_ON,
+                        MAX_VERTEX_BUFFER, MAX_ELEMENT_BUFFER);
+        glfwSwapBuffers(win);
+    }
+
+    /* ---------- Cleanup ---------- */
+    ui_form_free(&g_settings_form);
+    nk_glfw3_shutdown(&nk_glfw);
+    glfwTerminate();
+    return 0;
+}
