@@ -32,6 +32,7 @@
 
 #define WINDOW_WIDTH  1100
 #define WINDOW_HEIGHT  700
+#define SIDEBAR_W      200
 
 #define MAX_VERTEX_BUFFER  (512 * 1024)
 #define MAX_ELEMENT_BUFFER (128 * 1024)
@@ -53,6 +54,7 @@ static ui_panel     *g_panels = NULL;          /* master panel list        */
 static ui_form       g_settings_form;
 
 static nk_bool g_panel_visible = nk_false;
+static nk_bool g_panel_buck_converter_visible = nk_false;
 
 static double g_time = 0.0;
 
@@ -60,77 +62,39 @@ static double g_time = 0.0;
 /*  Panel callbacks                                                    */
 /* ------------------------------------------------------------------ */
 
-/* ---------- Main panel ---------- */
-static void draw_main(struct nk_context *ctx, ui_panel *panel)
+/* ---------- Sidebar panel (fixed left dock, no move/resize) ---------- */
+static void draw_sidebar(struct nk_context *ctx, ui_panel *panel)
 {
     (void)panel;
     nk_layout_row_dynamic(ctx, 30, 1);
-    nk_label(ctx, "Welcome to the Nuklear UI Infrastructure demo!", NK_TEXT_CENTERED);
-    nk_layout_row_dynamic(ctx, 20, 1);
-    nk_label(ctx, "Use the Settings panel to change the live plot below.", NK_TEXT_LEFT);
-    nk_layout_row_dynamic(ctx, 20, 1);
-    nk_label(ctx, "Panels are structs; forms are built declaratively.", NK_TEXT_LEFT);
-    nk_layout_row_static(ctx, 30, 140, 1);
-    if (nk_button_label(ctx, "Button"))
-        g_panel_visible = nk_true;
-}
+    nk_label(ctx, "TOOLS", NK_TEXT_CENTERED);
+    nk_layout_row_dynamic(ctx, 6, 1);
+    nk_spacing(ctx, 1);
+    nk_layout_row_dynamic(ctx, 35, 1);
 
-/* ---------- Settings panel ---------- */
-static void draw_settings(struct nk_context *ctx, ui_panel *panel)
-{
-    (void)panel;
-    ui_form_render(ctx, &g_settings_form);
-
-    /* Apply settings to the shared plot */
-    if (g_custom_color) {
-        g_plot.use_custom_colors = nk_true;
-        g_plot.line_color = nk_rgb((int)(g_line_col.r*255),
-                                   (int)(g_line_col.g*255),
-                                   (int)(g_line_col.b*255));
-    } else {
-        g_plot.use_custom_colors = nk_false;
+    // here we add a new button to sidebar
+    if (nk_button_label(ctx, "Buck Converter")) {
+        g_panel_buck_converter_visible = nk_true;
     }
-    g_plot.type = (g_combo_sel == 0) ? NK_CHART_LINES : NK_CHART_COLUMN;
 }
 
-/* ---------- Plot panel ---------- */
-static void draw_plot(struct nk_context *ctx, ui_panel *panel)
-{
-    (void)panel;
-    nk_layout_row_dynamic(ctx, 30, 1);
-    nk_label(ctx, g_plot.title, NK_TEXT_CENTERED);
-    nk_layout_row_dynamic(ctx, 200, 1);
-    ui_plot_render(ctx, &g_plot);
-    nk_layout_row_dynamic(ctx, 20, 1);
-    nk_labelf(ctx, NK_TEXT_RIGHT, "points: %d  |  range: [%.2f, %.2f]",
-              g_plot.count, g_plot.min_val, g_plot.max_val);
-}
 
 /* ---------- Hello popup ---------- */
 static nk_bool g_hello_visible = nk_false;
-
-static void draw_hello(struct nk_context *ctx, ui_panel *panel)
-{
-    (void)panel;
-    nk_layout_row_dynamic(ctx, 30, 1);
-    nk_label(ctx, "Hello, world!", NK_TEXT_CENTERED);
-    nk_layout_row_static(ctx, 35, 100, 1);
-    if (nk_button_label(ctx, "Close"))
-        g_hello_visible = nk_false;
-}
 
 /* ------------------------------------------------------------------ */
 /*  Form button callbacks                                              */
 /* ------------------------------------------------------------------ */
 
 /* ---------- Panel tool ---------- */
-static void draw_panel(struct nk_context *ctx, ui_panel *pnl)
+static void draw_buck_converter_panel(struct nk_context *ctx, ui_panel *pnl)
 {
     (void)pnl;
-    if (nk_window_is_closed(ctx, "Panel"))
-        g_panel_visible = nk_false;
+    if (nk_window_is_closed(ctx, "Buck Converter")) {
+        g_panel_buck_converter_visible = nk_true;
+    }
     nk_layout_row_dynamic(ctx, 30, 1);
-    nk_label(ctx, "Hello, world!", NK_TEXT_CENTERED);
+    nk_label(ctx, "Buck Converter Calculator", NK_TEXT_CENTERED);
 }
 
 static void toggle_hello_cb(void *data)
@@ -172,7 +136,7 @@ int main(void)
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
     win = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT,
-                           "Nuklear UI Infrastructure Demo", NULL, NULL);
+                           "Coffeezz", NULL, NULL);
     if (!win) {
         fprintf(stderr, "Failed to create window\n");
         glfwTerminate();
@@ -190,51 +154,30 @@ int main(void)
     }
 
     /* ---------- Build panels ---------- */
-    static ui_panel main_panel, settings_panel, plot_panel, hello_panel;
 
-    ui_panel_init(&main_panel, "Main",
-                  nk_rect(10, 10, 300, 130),
-                  NK_WINDOW_BORDER | NK_WINDOW_TITLE |
-                  NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE,
-                  draw_main, NULL);
-
-    ui_panel_init(&settings_panel, "Settings",
-                  nk_rect(10, 150, 320, 480),
-                  NK_WINDOW_BORDER | NK_WINDOW_TITLE |
-                  NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE,
-                  draw_settings, NULL);
-
-    ui_panel_init(&plot_panel, "Plot",
-                  nk_rect(340, 10, 750, 320),
-                  NK_WINDOW_BORDER | NK_WINDOW_TITLE |
-                  NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE,
-                  draw_plot, NULL);
-
-    ui_panel_init(&hello_panel, "Hello",
-                  nk_rect(200, 200, 250, 120),
-                  NK_WINDOW_BORDER | NK_WINDOW_TITLE |
-                  NK_WINDOW_MOVABLE | NK_WINDOW_CLOSABLE,
-                  draw_hello, NULL);
-    hello_panel.visible = nk_false;   /* hidden until button is pressed */
+    /* Sidebar — fixed left dock */
+    static ui_panel sidebar_panel;
+    ui_panel_init(&sidebar_panel, "Tools",
+                  nk_rect(0, 0, SIDEBAR_W, WINDOW_HEIGHT),
+                  NK_WINDOW_BORDER | NK_WINDOW_TITLE,
+                  draw_sidebar, NULL);
+    ui_panel_add(&g_panels, &sidebar_panel);
 
     /* ---------- Panel tool ---------- */
     static ui_panel panel_panel;
-    float pw = 300;
-    float ph = (float)WINDOW_HEIGHT - 20;
+    float pw = (float)(WINDOW_WIDTH - SIDEBAR_W - 20);
+    float ph = (float)(WINDOW_HEIGHT - 20);
     ui_panel_init(&panel_panel, "Panel",
-                  nk_rect(WINDOW_WIDTH - pw - 10, 10, pw, ph),
+                  nk_rect(SIDEBAR_W + 10, 10, pw, ph),
                   NK_WINDOW_BORDER | NK_WINDOW_TITLE |
                   NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
                   NK_WINDOW_CLOSABLE,
-                  draw_panel, NULL);
+                  draw_buck_converter_panel, NULL);
     panel_panel.visible = nk_false;
     ui_panel_add(&g_panels, &panel_panel);
 
     /* Register all panels (order doesn't matter, render iterates list) */
-    ui_panel_add(&g_panels, &main_panel);
-    ui_panel_add(&g_panels, &settings_panel);
-    ui_panel_add(&g_panels, &plot_panel);
-    ui_panel_add(&g_panels, &hello_panel);
+    //ui_panel_add(&g_panels, pan);
 
     /* ---------- Build the Settings form ---------- */
     ui_form_init(&g_settings_form);
@@ -268,7 +211,6 @@ int main(void)
         ui_plot_push(&g_plot, val);
 
         /* Toggle hello panel visibility based on button */
-        hello_panel.visible = g_hello_visible;
         panel_panel.visible = g_panel_visible;
 
         /* Nuklear frame */

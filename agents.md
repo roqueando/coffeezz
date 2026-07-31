@@ -513,10 +513,10 @@ window. The new panel is empty — you define its contents afterward with
 3. **Register the panel** in `main()` right after the other `ui_panel_init` calls:
    ```c
    static ui_panel <panel_name>_panel;
-   float pw = 300;   /* panel width */
-   float ph = (float)WINDOW_HEIGHT - 20;
+   float pw = (float)(WINDOW_WIDTH - SIDEBAR_W - 20);   /* fill remaining space */
+   float ph = (float)(WINDOW_HEIGHT - 20);
    ui_panel_init(&<panel_name>_panel, "<panel-title>",
-                 nk_rect(WINDOW_WIDTH - pw - 10, 10, pw, ph),
+                 nk_rect(SIDEBAR_W + 10, 10, pw, ph),
                  NK_WINDOW_BORDER | NK_WINDOW_TITLE |
                  NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
                  NK_WINDOW_CLOSABLE,
