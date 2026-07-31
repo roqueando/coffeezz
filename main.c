@@ -29,6 +29,7 @@
 #include "nuklear.h"
 #include "nuklear_glfw_gl3.h"
 #include "ui_infra.h"
+#include "tools/tools.h"
 
 #define WINDOW_WIDTH  1100
 #define WINDOW_HEIGHT  700
@@ -53,9 +54,6 @@ static ui_plot       g_plot;
 static ui_panel     *g_panels = NULL;          /* master panel list        */
 static ui_form       g_settings_form;
 
-static nk_bool g_panel_visible = nk_false;
-static nk_bool g_panel_buck_converter_visible = nk_false;
-
 static double g_time = 0.0;
 
 /* ------------------------------------------------------------------ */
@@ -70,12 +68,9 @@ static void draw_sidebar(struct nk_context *ctx, ui_panel *panel)
     nk_label(ctx, "TOOLS", NK_TEXT_CENTERED);
     nk_layout_row_dynamic(ctx, 6, 1);
     nk_spacing(ctx, 1);
-    nk_layout_row_dynamic(ctx, 35, 1);
 
-    // here we add a new button to sidebar
-    if (nk_button_label(ctx, "Buck Converter")) {
-        g_panel_buck_converter_visible = nk_true;
-    }
+    /* Tool buttons managed by the registry */
+    tool_registry_draw_sidebar(ctx);
 }
 
 
@@ -85,17 +80,6 @@ static nk_bool g_hello_visible = nk_false;
 /* ------------------------------------------------------------------ */
 /*  Form button callbacks                                              */
 /* ------------------------------------------------------------------ */
-
-/* ---------- Panel tool ---------- */
-static void draw_buck_converter_panel(struct nk_context *ctx, ui_panel *pnl)
-{
-    (void)pnl;
-    if (nk_window_is_closed(ctx, "Buck Converter")) {
-        g_panel_buck_converter_visible = nk_true;
-    }
-    nk_layout_row_dynamic(ctx, 30, 1);
-    nk_label(ctx, "Buck Converter Calculator", NK_TEXT_CENTERED);
-}
 
 static void toggle_hello_cb(void *data)
 {
@@ -163,21 +147,8 @@ int main(void)
                   draw_sidebar, NULL);
     ui_panel_add(&g_panels, &sidebar_panel);
 
-    /* ---------- Panel tool ---------- */
-    static ui_panel panel_panel;
-    float pw = (float)(WINDOW_WIDTH - SIDEBAR_W - 20);
-    float ph = (float)(WINDOW_HEIGHT - 20);
-    ui_panel_init(&panel_panel, "Panel",
-                  nk_rect(SIDEBAR_W + 10, 10, pw, ph),
-                  NK_WINDOW_BORDER | NK_WINDOW_TITLE |
-                  NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
-                  NK_WINDOW_CLOSABLE,
-                  draw_buck_converter_panel, NULL);
-    panel_panel.visible = nk_false;
-    ui_panel_add(&g_panels, &panel_panel);
-
-    /* Register all panels (order doesn't matter, render iterates list) */
-    //ui_panel_add(&g_panels, pan);
+    /* ---------- Register all tools (auto-registers panels) ---------- */
+    tools_init(&g_panels, SIDEBAR_W, WINDOW_WIDTH, WINDOW_HEIGHT);
 
     /* ---------- Build the Settings form ---------- */
     ui_form_init(&g_settings_form);
@@ -210,8 +181,8 @@ int main(void)
         float val = sinf((float)(g_time * g_plot_speed)) * 0.9f;
         ui_plot_push(&g_plot, val);
 
-        /* Toggle hello panel visibility based on button */
-        panel_panel.visible = g_panel_visible;
+        /* Sync tool panel visibility from registry toggles */
+        tool_registry_update();
 
         /* Nuklear frame */
         nk_glfw3_new_frame(&nk_glfw);

@@ -487,66 +487,69 @@ not suggestions.
 /create-tool <button-label> <panel-title>
 ```
 
-**What it builds:** A button (placed inside the existing **Main** panel)
-that, when clicked, shows a new side‑panel docked to the right side of the
-window. The new panel is empty — you define its contents afterward with
-`/add-form` or `/add-plot`.
+**What it builds:** A tool subdirectory under `tools/` with its own `.h` and `.c`
+files.  A sidebar button (rendered automatically by the tool registry) opens a
+right‑side panel that fills all remaining space to the right of the sidebar.
 
 **Agent steps:**
 
-1. **Add a `static nk_bool`** toggle variable in the "Application state" region
-   (near `g_hello_visible`):
-   ```c
-   static nk_bool g_<panel_name>_visible = nk_false;
-   ```
-   where `<panel_name>` is a snake_case version of `<panel-title>`.
+1. **Create the tool directory** — `tools/<tool_name>/` where `<tool_name>` is
+a snake_case version of `<panel-title>` (e.g. `buck_converter`).
 
-2. **Write a draw callback** in the "Panel callbacks" region:
+2. **Write the header** — `tools/<tool_name>/<tool_name>.h`:
    ```c
-   static void draw_<panel_name>(struct nk_context *ctx, ui_panel *panel) {
-       (void)panel;
+   #ifndef <TOOL_NAME>_H_
+   #define <TOOL_NAME>_H_
+
+   #include "ui_infra.h"
+
+   void <tool_name>_register(ui_panel **head, int sidebar_w, int win_w, int win_h);
+
+   #endif /* <TOOL_NAME>_H_ */
+   ```
+
+3. **Write the implementation** — `tools/<tool_name>/<tool_name>.c`:
+   ```c
+   #include "nuklear.h"
+   #include "ui_infra.h"
+   #include <stdlib.h>
+   #include "tools/tool_registry.h"
+   #include "tools/<tool_name>/<tool_name>.h"
+
+   static void <tool_name>_draw(struct nk_context *ctx, ui_panel *pnl)
+   {
+       tool_registry_check_close(ctx, pnl);
        nk_layout_row_dynamic(ctx, 30, 1);
        nk_label(ctx, "Contents go here", NK_TEXT_LEFT);
    }
+
+   void <tool_name>_register(ui_panel **head, int sidebar_w, int win_w, int win_h)
+   {
+       tool_desc desc = {
+           .button_label = "<button-label>",
+           .panel_title  = "<panel-title>",
+           .draw         = <tool_name>_draw,
+           .user_data    = NULL
+       };
+       tool_register(head, sidebar_w, win_w, win_h, &desc);
+   }
    ```
 
-3. **Register the panel** in `main()` right after the other `ui_panel_init` calls:
+4. **Register the tool in `tools/tools.h`** — add the include line:
    ```c
-   static ui_panel <panel_name>_panel;
-   float pw = (float)(WINDOW_WIDTH - SIDEBAR_W - 20);   /* fill remaining space */
-   float ph = (float)(WINDOW_HEIGHT - 20);
-   ui_panel_init(&<panel_name>_panel, "<panel-title>",
-                 nk_rect(SIDEBAR_W + 10, 10, pw, ph),
-                 NK_WINDOW_BORDER | NK_WINDOW_TITLE |
-                 NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
-                 NK_WINDOW_CLOSABLE,
-                 draw_<panel_name>, NULL);
-   <panel_name>_panel.visible = nk_false;
-   ui_panel_add(&g_panels, &<panel_name>_panel);
+   #include "tools/<tool_name>/<tool_name>.h"
    ```
 
-4. **Add the button** inside `draw_main` (the Main panel's draw callback),
-   before the closing brace:
+5. **Register the tool in `tools/tools.c`** — add the call inside `tools_init()`:
    ```c
-   nk_layout_row_static(ctx, 30, 140, 1);
-   if (nk_button_label(ctx, "<button-label>"))
-       g_<panel_name>_visible = nk_true;
+   <tool_name>_register(head, sidebar_w, win_w, win_h);
    ```
 
-5. **Update panel visibility** in the main loop — find where
-   `hello_panel.visible = g_hello_visible;` is set and add the same pattern:
-   ```c
-   <panel_name>_panel.visible = g_<panel_name>_visible;
-   ```
+6. **Rebuild** with `make clean && make` and verify no warnings.
 
-6. **Handle close‑button**: the `NK_WINDOW_CLOSABLE` flag puts an × on the
-   title bar. Add a check inside the new panel's draw callback:
-   ```c
-   if (nk_window_is_closed(ctx, "<panel-title>"))
-       g_<panel_name>_visible = nk_false;
-   ```
-
-7. **Rebuild** with `make` and verify no warnings.
+**Note:** The tool registry automatically handles sidebar button rendering,
+panel visibility toggling, and close‑button detection.  No changes to `main.c`
+are needed.
 
 ---
 
