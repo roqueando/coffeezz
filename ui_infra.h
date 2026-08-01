@@ -120,7 +120,7 @@ void  ui_form_render(struct nk_context *ctx, ui_form *form);
 /*  PLOT                                                               */
 /* ------------------------------------------------------------------ */
 
-#define UI_PLOT_MAX_POINTS  1024
+#define UI_PLOT_MAX_POINTS  8192
 
 typedef struct ui_plot {
     float               buffer[UI_PLOT_MAX_POINTS];
@@ -135,10 +135,22 @@ typedef struct ui_plot {
     struct nk_color     line_color;
     struct nk_color     bg_color;
     nk_bool             use_custom_colors;
+
+    /* X-axis range for labelled plots (set x_max > x_min to enable axes) */
+    float               x_min;
+    float               x_max;
+    const char         *x_label;
+    const char         *y_label;
 } ui_plot;
 
 void  ui_plot_init (ui_plot *plot, const char *title, enum nk_chart_type type);
 void  ui_plot_push (ui_plot *plot, float value);
+
+/* Set the X-axis range for the plot.  When x_max > x_min, the renderer
+ * will draw labelled axes with tick marks instead of the bare Nuklear chart.
+ * Call after ui_plot_init and whenever the range changes. */
+void  ui_plot_set_x_range(ui_plot *plot, float x_min, float x_max);
+
 void  ui_plot_render(struct nk_context *ctx, ui_plot *plot);
 
 #endif /* UI_INFRA_H_ */

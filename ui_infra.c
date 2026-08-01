@@ -350,6 +350,19 @@ void ui_plot_init(ui_plot *plot, const char *title, enum nk_chart_type type)
     plot->line_color = nk_rgb(0, 120, 220);
     plot->bg_color   = nk_rgb(30, 30, 40);
     plot->use_custom_colors = nk_false;
+
+    /* axes disabled by default */
+    plot->x_min   = 0.0f;
+    plot->x_max   = 0.0f;
+    plot->x_label = NULL;
+    plot->y_label = NULL;
+}
+
+void ui_plot_set_x_range(ui_plot *plot, float x_min, float x_max)
+{
+    plot->x_min = x_min;
+    plot->x_max = x_max;
+    if (x_min > x_max) { float t = x_min; x_min = x_max; x_max = t; }
 }
 
 void ui_plot_push(ui_plot *plot, float value)
@@ -368,6 +381,216 @@ void ui_plot_push(ui_plot *plot, float value)
     }
 }
 
+/* ---- helper: nice tick spacing ---- */
+static float nice_num(float range, int round)
+{
+    float exponent = floorf(log10f(range));
+    float fraction = range / powf(10.0f, exponent);
+    float nice;
+    if (round) {
+        if (fraction < 1.5f)      nice = 1.0f;
+        else if (fraction < 3.0f) nice = 2.0f;
+        else if (fraction < 7.0f) nice = 5.0f;
+        else                      nice = 10.0f;
+    } else {
+        if (fraction <= 1.0f)     nice = 1.0f;
+        else if (fraction <= 2.0f) nice = 2.0f;
+        else if (fraction <= 5.0f) nice = 5.0f;
+        else                      nice = 10.0f;
+    }
+    return nice * powf(10.0f, exponent);
+}
+
+static void draw_axes_chart(struct nk_context *ctx, ui_plot *plot)
+{
+    struct nk_command_buffer *canvas = nk_window_get_canvas(ctx);
+    const struct nk_user_font *font  = ctx->style.font;
+    if (!canvas || !font) return;
+
+    /* ---------------------------------------------------------------- */
+    /* Use the already-allocated row cell (set by caller via             */
+    /* nk_layout_row_dynamic) instead of a nested layout space, so       */
+    /* coordinates are in screen space and no clipping is imposed.       */
+    /* ---------------------------------------------------------------- */
+    struct nk_rect total = nk_widget_bounds(ctx);
+    /* consume the slot (we draw onto the canvas ourselves) */
+    nk_spacing(ctx, 1);
+
+    if (total.w < 10.0f || total.h < 10.0f) return;
+
+    /* margins: left = 65 for Y-labels, bottom = 30 for X-labels,
+     *          top = 8, right = 12                                     */
+    float ml = 65.0f, mr = 12.0f, mt = 8.0f, mb = 30.0f;
+    struct nk_rect inner;
+    inner.x = total.x + ml;
+    inner.y = total.y + mt;
+    inner.w = total.w - ml - mr;
+    inner.h = total.h - mt - mb;
+    if (inner.w <= 0 || inner.h <= 0) return;
+
+    /* data ranges */
+    float y_margin = (plot->max_val - plot->min_val) * 0.05f;
+    if (y_margin < 0.01f) y_margin = 0.1f;
+    float y_lo = plot->min_val - y_margin;
+    float y_hi = plot->max_val + y_margin;
+    if (y_hi - y_lo < 0.001f) { y_hi = y_lo + 1.0f; }
+
+    float x_lo = plot->x_min;
+    float x_hi = plot->x_max;
+
+    /* helper to map data coords to screen rect */
+    #define X(val) (inner.x + ((val) - x_lo) / (x_hi - x_lo) * inner.w)
+    #define Y(val) (inner.y + (1.0f - ((val) - y_lo) / (y_hi - y_lo)) * inner.h)
+
+    /* colours */
+    struct nk_color bg_col   = nk_rgba(22, 24, 32, 255);
+    struct nk_color grid_col = nk_rgba(50, 54, 70, 255);
+    struct nk_color axis_col = nk_rgba(160, 162, 175, 255);
+    struct nk_color text_col = nk_rgba(200, 202, 215, 255);
+    struct nk_color line_col = plot->use_custom_colors
+                               ? plot->line_color
+                               : nk_rgba(0, 120, 220, 255);
+
+    /* ---- background & border ---- */
+    nk_fill_rect(canvas, total, 3.0f, bg_col);
+    nk_stroke_rect(canvas, inner, 0.0f, 1.0f, axis_col);
+
+    /* ---- Y-axis ticks ---- */
+    float y_range  = y_hi - y_lo;
+    float y_tick   = nice_num(y_range, 0);
+    float y_start  = floorf(y_lo / y_tick) * y_tick;
+    int   max_y_ticks = 12;
+
+    for (float v = y_start; v <= y_hi + y_tick * 0.5f; v += y_tick) {
+        if (v < y_lo - y_tick * 0.5f || v > y_hi + y_tick * 0.5f) continue;
+        if (--max_y_ticks < 0) break;
+        float py = Y(v);
+
+        /* grid line */
+        nk_stroke_line(canvas, inner.x, py, inner.x + inner.w, py,
+                       0.5f, grid_col);
+
+        /* tick mark */
+        nk_stroke_line(canvas, inner.x - 4.0f, py, inner.x, py,
+                       1.0f, axis_col);
+
+        /* label */
+        char lbl[32];
+        if (fabsf(v) >= 1000.0f)       snprintf(lbl, sizeof(lbl), "%.1fk", v * 0.001f);
+        else if (fabsf(v) >= 1.0f)     snprintf(lbl, sizeof(lbl), "%.1f",  v);
+        else if (fabsf(v) >= 0.001f)   snprintf(lbl, sizeof(lbl), "%.4f", v);
+        else                           snprintf(lbl, sizeof(lbl), "%.2e", v);
+
+        float text_w = font->width(font->userdata, 0.0f, lbl, (int)strlen(lbl));
+        float th     = font->height;
+        struct nk_rect trect = nk_rect(
+            inner.x - 8.0f - text_w,
+            py - th * 0.5f,
+            text_w, th);
+        nk_draw_text(canvas, trect, lbl, (int)strlen(lbl), font,
+                     nk_rgba(0,0,0,0), text_col);
+    }
+
+    /* ---- X-axis ticks ---- */
+    float x_range  = x_hi - x_lo;
+    float x_tick   = nice_num(x_range, 0);
+    float x_start  = ceilf(x_lo / x_tick) * x_tick;
+    int   max_x_ticks = 12;
+
+    for (float v = x_start; v <= x_hi + x_tick * 0.5f; v += x_tick) {
+        if (v < x_lo - x_tick * 0.5f || v > x_hi + x_tick * 0.5f) continue;
+        if (--max_x_ticks < 0) break;
+        float px = X(v);
+
+        /* grid line */
+        nk_stroke_line(canvas, px, inner.y, px, inner.y + inner.h,
+                       0.5f, grid_col);
+
+        /* tick mark */
+        nk_stroke_line(canvas, px, inner.y + inner.h, px,
+                       inner.y + inner.h + 4.0f, 1.0f, axis_col);
+
+        /* label */
+        char lbl[32];
+        snprintf(lbl, sizeof(lbl), "%.3g", v);
+        float text_w = font->width(font->userdata, 0.0f, lbl, (int)strlen(lbl));
+        float th     = font->height;
+        struct nk_rect trect = nk_rect(
+            px - text_w * 0.5f,
+            inner.y + inner.h + 6.0f,
+            text_w, th);
+        nk_draw_text(canvas, trect, lbl, (int)strlen(lbl), font,
+                     nk_rgba(0,0,0,0), text_col);
+    }
+
+    /* ---- axis labels ---- */
+    if (plot->x_label && plot->x_label[0]) {
+        int len = (int)strlen(plot->x_label);
+        float w = font->width(font->userdata, 0.0f, plot->x_label, len);
+        nk_draw_text(canvas,
+            nk_rect(inner.x + inner.w * 0.5f - w * 0.5f,
+                    inner.y + inner.h + 18.0f, w, font->height),
+            plot->x_label, len, font, nk_rgba(0,0,0,0), axis_col);
+    }
+    if (plot->y_label && plot->y_label[0]) {
+        /* Skipping Y-axis label (vertical text not supported by nk_draw_text).
+         * Could be added later with rotated text via nk_push_custom. */
+        (void)plot->y_label;
+    }
+
+    /* ---- data series ---- */
+    if (plot->type == NK_CHART_COLUMN) {
+        /* column chart: one bar per point across X range */
+        int n = plot->count;
+        if (n < 1) return;
+        int oldest = (plot->head >= n) ? 0 : plot->head;
+        float bar_w = (inner.w / (float)n) * 0.75f;
+        float gap   = (inner.w / (float)n) * 0.25f;
+        for (int i = 0; i < n; i++) {
+            int idx = (oldest + i) % UI_PLOT_MAX_POINTS;
+            float val = plot->buffer[idx];
+            float bx = inner.x + gap * 0.5f + (float)i * (bar_w + gap);
+            float top = Y(val > 0 ? val : 0.0f);
+            float bot = Y(val > 0 ? 0.0f : val);
+            if (top > bot) { float t = top; top = bot; bot = t; }
+            nk_fill_rect(canvas, nk_rect(bx, top, bar_w, bot - top),
+                         0.0f, line_col);
+        }
+    } else {
+        /* line chart: connect consecutive points */
+        int n = plot->count;
+        if (n < 2) {
+            /* single point – draw a small circle */
+            int oldest = (plot->head >= n) ? 0 : plot->head;
+            float vx = X(x_lo);
+            float vy = Y(plot->buffer[oldest]);
+            nk_fill_circle(canvas, nk_rect(vx - 2.5f, vy - 2.5f, 5.0f, 5.0f),
+                           line_col);
+            return;
+        }
+        int oldest = (plot->head >= n) ? 0 : plot->head;
+        for (int i = 0; i < n - 1; i++) {
+            int idx0 = (oldest + i)     % UI_PLOT_MAX_POINTS;
+            int idx1 = (oldest + i + 1) % UI_PLOT_MAX_POINTS;
+
+            /* map time: point i corresponds to time
+             *   t_i = x_lo + (x_hi - x_lo) * i / (n-1)                 */
+            float t0 = x_lo + (x_hi - x_lo) * (float)i     / (float)(n - 1);
+            float t1 = x_lo + (x_hi - x_lo) * (float)(i+1) / (float)(n - 1);
+
+            float sx0 = X(t0);
+            float sy0 = Y(plot->buffer[idx0]);
+            float sx1 = X(t1);
+            float sy1 = Y(plot->buffer[idx1]);
+
+            nk_stroke_line(canvas, sx0, sy0, sx1, sy1, 1.5f, line_col);
+        }
+    }
+
+    #undef X
+    #undef Y
+}
+
 void ui_plot_render(struct nk_context *ctx, ui_plot *plot)
 {
     if (plot->count == 0) {
@@ -375,6 +598,13 @@ void ui_plot_render(struct nk_context *ctx, ui_plot *plot)
         return;
     }
 
+    /* If X range is configured, use the custom axes renderer */
+    if (plot->x_max > plot->x_min) {
+        draw_axes_chart(ctx, plot);
+        return;
+    }
+
+    /* Original nk_chart fallback (no axes) */
     float margin = (plot->max_val - plot->min_val) * 0.05f;
     float lo = plot->min_val - margin;
     float hi = plot->max_val + margin;

@@ -11,6 +11,7 @@
 #include "ui_infra.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <math.h>
 #include "tools/tool_registry.h"
 #include "tools/boost_converter/boost_converter.h"
@@ -29,8 +30,22 @@ static float    g_iL    = 0.0f;       /* instantaneous inductor current */
 static float    g_sim_t = 0.0f;       /* elapsed simulation time (s)    */
 static nk_bool  g_running = nk_true;  /* pause / resume                 */
 
+/* configurable time limit */
+static float    g_time_limit = 5.0f;
+
 /* plot for Vout(t) */
 static ui_plot  g_plot;
+
+/* snapshot of last frame's parameters (for auto-restart detection) */
+static float    g_snap_vin  = 0.0f;
+static float    g_snap_duty = 0.0f;
+static float    g_snap_L    = 0.0f;
+static float    g_snap_C    = 0.0f;
+static float    g_snap_R    = 0.0f;
+static float    g_snap_freq = 0.0f;
+
+/* plot sample accumulator (survives across frames; reset on restart) */
+static float    g_plot_accum = 0.0f;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -46,13 +61,28 @@ static void reset_sim(void)
     g_plot.count = 0;
     g_plot.min_val = 0.0f;
     g_plot.max_val = 0.0f;
+
+    g_plot_accum = 0.0f;
+
+    /* capture current parameter snapshot */
+    g_snap_vin  = g_vin;
+    g_snap_duty = g_duty;
+    g_snap_L    = g_L;
+    g_snap_C    = g_C;
+    g_snap_R    = g_R;
+    g_snap_freq = g_freq;
 }
 
 /* Advance simulation by one "chunk" (≈ 0.2 ms real time per frame).
  * Uses sub-cycle stepping with the two boost phases. */
 static void step_simulation(void)
 {
+    /* Honour pause flag and time limit */
     if (!g_running) return;
+    if (g_sim_t >= g_time_limit) {
+        g_running = nk_false;
+        return;
+    }
 
     float chunk_dt  = 0.2e-3f;        /* 0.2 ms advance per frame      */
     float sub_dt    = 0.01e-6f;       /* 10 ns sub-step                */
@@ -103,14 +133,19 @@ static void step_simulation(void)
         if (g_iL   > 100.0f)  g_iL   = 100.0f;
         if (g_vout < Vin)     g_vout = Vin;
         if (g_vout > 2000.0f) g_vout = 2000.0f;
+
+        /* stop early if we hit the time limit during sub-stepping */
+        if (g_sim_t >= g_time_limit) {
+            g_running = nk_false;
+            break;
+        }
     }
 
     /* push sample into plot every ~1 ms of sim time */
-    static float plot_accum = 0.0f;
-    plot_accum += chunk_dt;
-    while (plot_accum >= 1e-3f) {
+    g_plot_accum += chunk_dt;
+    while (g_plot_accum >= 1e-3f) {
         ui_plot_push(&g_plot, g_vout);
-        plot_accum -= 1e-3f;
+        g_plot_accum -= 1e-3f;
     }
 }
 
@@ -121,6 +156,18 @@ static void step_simulation(void)
 static void boost_converter_draw(struct nk_context *ctx, ui_panel *pnl)
 {
     tool_registry_check_close(ctx, pnl);
+
+    /* ---------------------------------------------------------------- */
+    /* Auto-restart: if paused and any parameter changed, reset & run   */
+    /* ---------------------------------------------------------------- */
+    if (!g_running) {
+        if (g_vin  != g_snap_vin  || g_duty != g_snap_duty ||
+            g_L    != g_snap_L    || g_C    != g_snap_C    ||
+            g_R    != g_snap_R    || g_freq != g_snap_freq) {
+            reset_sim();
+            g_running = nk_true;
+        }
+    }
 
     /* advance simulation */
     step_simulation();
@@ -174,13 +221,32 @@ static void boost_converter_draw(struct nk_context *ctx, ui_panel *pnl)
         nk_property_float(ctx, "#f", 1.0f, &f_kHz, 1000.0f, 1.0f, 1.0f);
         g_freq = f_kHz * 1e3f;
 
+        /* Time limit (s) */
+        float prev_limit = g_time_limit;
+        nk_layout_row_dynamic(ctx, 25, 2);
+        nk_label(ctx, "Time limit (s):", NK_TEXT_LEFT);
+        nk_property_float(ctx, "#tlim", 0.5f, &g_time_limit, 60.0f, 0.1f, 1.0f);
+
+        /* Update plot X range if limit changed */
+        if (g_time_limit != prev_limit) {
+            ui_plot_set_x_range(&g_plot, 0, g_time_limit);
+        }
+
         /* control buttons */
         nk_layout_row_dynamic(ctx, 8, 1);
         nk_spacing(ctx, 1);
-        nk_layout_row_dynamic(ctx, 30, 3);
-        if (nk_button_label(ctx, "Reset"))  reset_sim();
-        if (nk_button_label(ctx, g_running ? "⏸ Pause" : "▶ Run"))
+        nk_layout_row_dynamic(ctx, 30, 4);
+        if (nk_button_label(ctx, "Restart")) {
+            reset_sim();
+            g_running = nk_true;
+        }
+        if (nk_button_label(ctx, g_running ? "⏸ Pause" : "▶ Run")) {
+            if (!g_running && g_sim_t >= g_time_limit) {
+                reset_sim();
+            }
             g_running = !g_running;
+        }
+        nk_spacing(ctx, 1);
         nk_spacing(ctx, 1);
 
         /* ========================================================== */
@@ -273,6 +339,19 @@ void boost_converter_register(ui_panel **head, int sidebar_w,
     ui_plot_init(&g_plot, "Vout(t)", NK_CHART_LINES);
     g_plot.use_custom_colors = nk_true;
     g_plot.line_color        = nk_rgb(50, 200, 100);   /* green       */
+
+    /* configure X axis range and labels */
+    ui_plot_set_x_range(&g_plot, 0.0f, g_time_limit);
+    g_plot.x_label = "Time (s)";
+    g_plot.y_label = "Vout (V)";
+
+    /* capture initial parameter snapshot */
+    g_snap_vin  = g_vin;
+    g_snap_duty = g_duty;
+    g_snap_L    = g_L;
+    g_snap_C    = g_C;
+    g_snap_R    = g_R;
+    g_snap_freq = g_freq;
 
     tool_desc desc = {
         .button_label = "Boost Converter",
