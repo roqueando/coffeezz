@@ -65,7 +65,7 @@ ui_panel * tool_register(ui_panel **head, int sidebar_w, int win_w, int win_h,
                   nk_rect((float)(sidebar_w + 10), 10, pw, ph),
                   NK_WINDOW_BORDER | NK_WINDOW_TITLE |
                   NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
-                  NK_WINDOW_CLOSABLE,
+                  NK_WINDOW_CLOSABLE | NK_WINDOW_MINIMIZABLE,
                   desc->draw, desc->user_data);
     slot->panel->visible = nk_false;   /* start hidden */
 

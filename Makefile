@@ -1,6 +1,7 @@
 CC       ?= cc
 GLFW_PREFIX = /opt/homebrew/opt/glfw
-CFLAGS   += -std=c11 -Wall -Wextra -O2 -I$(GLFW_PREFIX)/include -I.
+CFLAGS   += -std=c11 -Wall -Wextra -I$(GLFW_PREFIX)/include -I.
+CFLAGS 	+= -g3 -O0
 LDFLAGS  += -L$(GLFW_PREFIX)/lib -lglfw -framework OpenGL -framework Cocoa -framework IOKit
 
 TARGET    = nuklear_app

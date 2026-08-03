@@ -28,7 +28,7 @@ static float    g_freq  = 100e3f;     /* switching frequency (Hz)       */
 static float    g_vout  = 12.0f;      /* instantaneous Vout             */
 static float    g_iL    = 0.0f;       /* instantaneous inductor current */
 static float    g_sim_t = 0.0f;       /* elapsed simulation time (s)    */
-static nk_bool  g_running = nk_true;  /* pause / resume                 */
+static nk_bool  g_running = nk_false;  /* pause / resume                 */
 
 /* configurable time limit */
 static float    g_time_limit = 5.0f;
@@ -333,7 +333,7 @@ void boost_converter_register(ui_panel **head, int sidebar_w,
     g_vout    = g_vin;
     g_iL      = 0.0f;
     g_sim_t   = 0.0f;
-    g_running = nk_true;
+    g_running = nk_false;  /* start stopped — user clicks Restart/Run */
 
     /* initialise the plot */
     ui_plot_init(&g_plot, "Vout(t)", NK_CHART_LINES);
