@@ -16,4 +16,5 @@ void tools_init(ui_panel **head, int sidebar_w, int win_w, int win_h)
     /* ----- Register each tool below ----- */
     buck_converter_register(head, sidebar_w, win_w, win_h);
     boost_converter_register(head, sidebar_w, win_w, win_h);
+    resistive_divisor_register(head, sidebar_w, win_w, win_h);
 }

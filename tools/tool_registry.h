@@ -19,6 +19,8 @@ typedef struct tool_desc {
     const char         *panel_title;    /* title bar of the tool panel  */
     ui_panel_draw_fn    draw;           /* called every frame inside nk_begin/nk_end */
     void               *user_data;      /* passed to draw callback       */
+    int                 panel_w;        /* 0 → fill; >0 → fixed width    */
+    int                 panel_h;        /* 0 → fill; >0 → fixed height   */
 } tool_desc;
 
 /* ---- Registry API ---- */

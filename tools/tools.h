@@ -13,6 +13,7 @@
 #include "tools/tool_registry.h"
 #include "tools/buck_converter/buck_converter.h"
 #include "tools/boost_converter/boost_converter.h"
+#include "tools/resistive_divisor/resistive_divisor.h"
 
 /* Initialise all tools. Must be called once during startup. */
 void tools_init(ui_panel **head, int sidebar_w, int win_w, int win_h);

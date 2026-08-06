@@ -58,9 +58,13 @@ ui_panel * tool_register(ui_panel **head, int sidebar_w, int win_w, int win_h,
     if (!slot->panel)
         return NULL;
 
-    /* panel fills all space to the right of the sidebar */
-    float pw = (float)(win_w - sidebar_w - 20);
-    float ph = (float)(win_h - 20);
+    /* panel size: use explicit dimensions if given, else fill remaining space */
+    float pw = (desc->panel_w > 0)
+               ? (float)desc->panel_w
+               : (float)(win_w - sidebar_w - 20);
+    float ph = (desc->panel_h > 0)
+               ? (float)desc->panel_h
+               : (float)(win_h - 20);
     ui_panel_init(slot->panel, desc->panel_title,
                   nk_rect((float)(sidebar_w + 10), 10, pw, ph),
                   NK_WINDOW_BORDER | NK_WINDOW_TITLE |
