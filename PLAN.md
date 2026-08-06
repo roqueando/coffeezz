@@ -1,87 +1,129 @@
-# Plan: Makefile tool support + separate tools into `tools/`
+# Plan: Tests, CI/CD, and Target Rename
 
 ## Context
 
-Currently the Makefile hardcodes `SRCS = main.c ui_infra.c`. There is a `tools/` folder with a stub `buck_converter/`, but the buck converter UI code lives directly in `main.c`. The goal is to:
+The `nuklear_app` C11+GLFW+Nuklear desktop app currently has:
+- No automated tests
+- No CI/CD pipeline
+- A target name (`nuklear_app`) that should be changed to `coffeez`
+- A hardcoded macOS-only Makefile (`/opt/homebrew/opt/glfw`)
 
-1. Update the Makefile to auto-discover and compile all `.c` files under `tools/`.
-2. Extract tool code out of `main.c` into their own directories under `tools/`.
-3. Establish a registration pattern so `main.c` stays generic and new tools are just dropped in.
+We need to add tests for the logic-layer code, set up GitHub Actions for build+test+release, and rename the binary.
 
 ## Approach
 
-### Makefile
-- Use `wildcard` to auto-discover tool source files: `tools/*.c` (infrastructure at tools root) + `tools/*/*.c` (individual tool subdirectories).
-- Compile tool `.c` files into `.o` files alongside the main objects.
-- Add `-I.` (root) to CFLAGS so tools can include `nuklear.h`, `ui_infra.h`, etc. with `#include "tools/tool_registry.h"` style paths.
-- Tools must **not** define `NK_IMPLEMENTATION` or `NK_GLFW_GL3_IMPLEMENTATION` — only `main.c` does.
+### 1. Target rename: `nuklear_app` → `coffeez`
 
-### Tool API
-Create a minimal **tool registry** (`tools/tool_registry.h` + `.c`) that:
-- Each tool registers itself with a descriptor (button label, panel title, draw callback).
-- The registry manages visibility toggles for each tool.
-- Provides `tool_registry_draw_sidebar(ctx)` — renders all tool buttons in the sidebar.
-- Provides `tool_registry_update()` — called each frame to sync panel visibility.
-- Provides `tool_registry_render_panels(ctx)` — renders all tool panels (or they integrate with the existing panel list).
+Change the `TARGET` variable in the Makefile. Also update `README.md` where it references `./nuklear_app`.
 
-Actually — the existing `ui_panel` system already handles rendering via `ui_panels_render(ctx, g_panels)`. So the registry just needs to:
-1. Store tool info (label, title, draw fn).
-2. Create a `ui_panel` per tool and add it to `g_panels`.
-3. Expose a sidebar draw function that renders buttons.
+### 2. Testing strategy
 
-### Registration pattern
-Each tool directory provides a `<tool>_register(ui_panel **panel_list)` function that creates its panel, adds it to the list, and registers with the tool registry for the sidebar button. These are called from `tools/tools_init()`.
+Many functions call Nuklear (`nk_begin`, `nk_button_label`, etc.) and require a GL context — these are **untestable** in a headless CI environment. The testable surface is the **data-structure logic**:
 
-A single `tools/tools.h` header includes all tool headers and `tools/tools.c` calls each tool's register function. Adding a tool means:
-1. Create `tools/<name>/` with `<name>.h` + `<name>.c`
-2. Add `#include "<name>/<name>.h"` to `tools/tools.h`
-3. Add `call` to `tools/tools.c`
+| Function | What it tests |
+|---|---|
+| `ui_panel_init` | Fields are set correctly |
+| `ui_panel_add` | Linked-list prepend |
+| `ui_panel_remove` | Unlink from list (head, middle, not‑found) |
+| `ui_form_init` | Zero-initialised form |
+| `ui_form_free` | Frees and zeroes |
+| Form builder (`ui_form_add_*`) | Append grows array, sets type/label/value/params |
+| `ui_plot_init` | Buffer zeroed, defaults correct |
+| `ui_plot_push` | Ring-buffer wrapping, count capping, auto‑scale |
+| `ui_plot_set_x_range` | Range stored, swapped when inverted |
+| `tool_registry_init` | Slot count zeroed |
+| `tool_register` | Panel created with correct bounds, added to list |
+| `tool_registry_update` | Panel.visible synced from slot.visible |
 
-**Alternative (auto-discovery):** The Makefile could auto-generate the init list, but that adds build complexity. The explicit `tools/tools.h` approach is simpler and transparent.
+Untestable (require Nuklear context or GL): `ui_panels_render`, `ui_form_render`, `ui_plot_render`, `draw_axes_chart`, `tool_registry_draw_sidebar`, `tool_registry_check_close`.
 
-### Buck converter migration
-Move the buck converter UI code from `main.c` into `tools/buck_converter/buck_converter.h` + `.c`. The tool registers its panel with the right-side full-space formula (`pw = WINDOW_WIDTH - SIDEBAR_W - 20`, etc.).
+**Test runner**: Use a single-header C test framework. **`acutest.h`** (MIT-licensed, ~1 file) is ideal — no dependencies, works with `make`, outputs TAP/JUnit.
 
-### `main.c` changes
-- Replace hardcoded buck converter code with calls to tool registry.
-- Sidebar's `draw_sidebar` calls `tool_registry_draw_sidebar(ctx)` instead of hardcoded buttons.
-- Main loop calls `tool_registry_update()` to sync visibility.
+**Structure**: A single `tests/` directory at the repo root containing:
+- `tests/acutest.h` — the test framework header
+- `tests/test_ui_infra.c` — tests for panel, form, plot
+- `tests/test_tool_registry.c` — tests for the tool registry
+
+**Compile tests** by adding a `test` target to the Makefile. Since the tested code needs `#include "nuklear.h"` (for `nk_rect`, `nk_bool`, etc.), we define the Nuklear types without `NK_IMPLEMENTATION` — the test code uses only the header types.
+
+### 3. CI/CD (GitHub Actions)
+
+**Workflow file**: `.github/workflows/ci.yml`
+
+**Jobs**:
+
+1. **build** — `macos-latest` runner
+   - Install GLFW: `brew install glfw`
+   - `make clean && make`
+   - Upload `coffeez` binary as artifact
+
+2. **test** — `macos-latest` runner
+   - Install GLFW
+   - `make test`
+   - (Tests are pure logic — no GL context needed, so they can run headless)
+
+3. **release** — triggered on `v*` tag push
+   - Build
+   - Create GitHub Release with `coffeez` binary attached
+   - Use `softprops/action-gh-release`
+
+### 4. Makefile changes
+
+- Rename `TARGET = coffeez`
+- Add test source files and a `test` target:
+  ```makefile
+  TEST_SRCS = tests/test_ui_infra.c tests/test_tool_registry.c
+  TEST_OBJS = $(TEST_SRCS:.c=.o) ui_infra.o tools/tool_registry.o
+  test: $(TEST_OBJS)
+      $(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+      ./test
+  ```
+- Add `test` to `.PHONY`
+- `clean` should also remove `test` binary and test `.o` files
+
+### 5. README updates
+
+- Update `./nuklear_app` to `./coffeez`
+- Add `make test` to quick start
 
 ## Files to modify / create
 
 | File | Action |
-|------|--------|
-| `Makefile` | Add wildcard tool discovery; add `-I.` to CFLAGS |
-| `tools/tool_registry.h` | **New** — tool descriptor type + registry API |
-| `tools/tool_registry.c` | **New** — registry implementation |
-| `tools/tools.h` | **New** — master include that collects all tool headers |
-| `tools/tools.c` | **New** — `tools_init()` calling each tool's register fn |
-| `tools/buck_converter/buck_converter.h` | **Rewrite** — declare `buck_converter_register()` |
-| `tools/buck_converter/buck_converter.c` | **Rewrite** — implement panel + draw callback |
-| `main.c` | Replace hardcoded buck converter with registry calls |
-| `agents.md` | Update `/create-tool` to reflect new tool registration pattern |
+|---|---|
+| `Makefile` | Rename TARGET, add `test` target and test compilation |
+| `README.md` | Update binary name references |
+| `tests/acutest.h` | **New** — single-header test framework |
+| `tests/test_ui_infra.c` | **New** — tests for panels, forms, plots |
+| `tests/test_tool_registry.c` | **New** — tests for tool registry |
+| `.github/workflows/ci.yml` | **New** — build, test, release workflow |
+
+## Reuse
+
+- All testable functions are in `ui_infra.c` and `tools/tool_registry.c` — no new code needed, just call them from test files.
+- Nuklear types (`nk_rect`, `nk_bool`, `nk_flags`, `nk_color`, `nk_colorf`, `nk_chart_type`) are available from `nuklear.h` without `NK_IMPLEMENTATION`.
 
 ## Steps
 
-- [ ] 1. Update `Makefile`: auto-discover `tools/*/*.c`, compile to `.o`, add `-I.` flag
-- [ ] 2. Create `tools/tool_registry.h` — type `tool_desc`, registry API
-- [ ] 3. Create `tools/tool_registry.c` — panel/visibility management, sidebar rendering
-- [ ] 4. Create `tools/tools.h` — master include
-- [ ] 5. Create `tools/tools.c` — `tools_init()` calling each tool register
-- [ ] 6. Rewrite `tools/buck_converter/buck_converter.h` — declare register function
-- [ ] 7. Rewrite `tools/buck_converter/buck_converter.c` — panel + draw callback
-- [ ] 8. Update `main.c` — use registry instead of hardcoded buck converter
-- [ ] 9. Build with `make clean && make`, verify no warnings
-- [ ] 10. Run `./nuklear_app`, verify Buck Converter button works, panel opens/closes
-- [ ] 11. Update `agents.md` `/create-tool` section for new pattern
+- [ ] 1. Rename `TARGET = coffeez` in Makefile
+- [ ] 2. Update `README.md` references to `nuklear_app` → `coffeez`
+- [ ] 3. Download `acutest.h` and place at `tests/acutest.h`
+- [ ] 4. Create `tests/test_ui_infra.c` — test panel, form, and plot logic
+- [ ] 5. Create `tests/test_tool_registry.c` — test registry logic
+- [ ] 6. Add `test` target to Makefile (compile test sources + run)
+- [ ] 7. Add `test` to `.PHONY` and `clean` rules
+- [ ] 8. Create `.github/workflows/ci.yml` with build, test, and release jobs
+- [ ] 9. Run `make clean && make && make test` locally to verify
+- [ ] 10. Push and verify CI passes on GitHub
 
 ## Verification
 
 ```sh
-make clean && make && ./nuklear_app
-```
+# Local
+make clean && make          # builds coffeez
+./coffeez                   # launches app (manual check, needs display)
+make test                   # runs test suite, should output "All tests passed"
 
-- Sidebar shows "Buck Converter" button (dynamically from registry).
-- Clicking it opens a right-side panel.
-- Close button (×) hides the panel.
-- No compiler warnings.
+# CI
+# Push to GitHub → Actions tab shows green build + test
+# Push a v* tag (e.g. v1.0.0) → Release created with coffeez binary attached
+```

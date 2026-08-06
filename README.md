@@ -15,7 +15,7 @@ brew install glfw
 
 # Build and run
 make clean && make
-./nuklear_app
+./coffeez
 ```
 
 ---
@@ -23,7 +23,7 @@ make clean && make
 ## Architecture
 
 ```
-nuklear_app
+coffeez
 ├── nuklear.h              ← single-header IMGUI (v4.13.3, public domain)
 ├── nuklear_glfw_gl3.h     ← GLFW + OpenGL 3.3 backend
 │

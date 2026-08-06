@@ -3,7 +3,7 @@
 ## 1. Architecture overview
 
 ```
-nuklear_app   (C11 + GLFW 3.3 + OpenGL 3.3 Core)
+coffeez   (C11 + GLFW 3.3 + OpenGL 3.3 Core)
 ├── nuklear.h               ← single‑header IMGUI (v4.13.3, public domain)
 ├── nuklear_glfw_gl3.h      ← backend: GLFW window + OpenGL 3.3 renderer
 │
@@ -29,7 +29,7 @@ nuklear_app   (C11 + GLFW 3.3 + OpenGL 3.3 Core)
 | `ui_infra.h` | Public types & prototypes for panels, forms, plots. **Include after nuklear.h.** |
 | `ui_infra.c` | Implementations. Compiled as a separate `.o` — no `NK_IMPLEMENTATION` here. |
 | `main.c` | App entry point. Holds `NK_IMPLEMENTATION` + `NK_GLFW_GL3_IMPLEMENTATION`. Includes `nuklear.h` *then* `ui_infra.h`. |
-| `Makefile` | Builds `nuklear_app` from `main.c` + `ui_infra.c`. |
+| `Makefile` | Builds `coffeez` from `main.c` + `ui_infra.c`. |
 
 ---
 
@@ -38,7 +38,7 @@ nuklear_app   (C11 + GLFW 3.3 + OpenGL 3.3 Core)
 ```sh
 make          # compile & link
 make clean    # remove artifacts
-./nuklear_app # launch
+./coffeez # launch
 ```
 
 **Dependencies** (macOS via Homebrew):
@@ -460,7 +460,7 @@ In `.c` files that are *not* the entry point (e.g. `ui_infra.c`), `NK_IMPLEMENTA
 |------|-------------------|
 | Build | `make` |
 | Clean build | `make clean && make` |
-| Run | `./nuklear_app` |
+| Run | `./coffeez` |
 | New panel | `ui_panel_init` → `ui_panel_add` |
 | New form | `ui_form_init` → `ui_form_add_*` → embed in panel draw |
 | New plot | `ui_plot_init` → `ui_plot_push` each frame → `ui_plot_render` in panel draw |
