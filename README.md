@@ -13,10 +13,25 @@ through a sidebar panel — no changes to `main.c` needed.
 # macOS only — install GLFW first
 brew install glfw
 
-# Build and run
+# Build and run (debug)
 make clean && make
-./coffeez
+./dist/debug/coffeez
+
+# Or: make release → runs ./dist/release/coffeez
+
+# Or grab the latest prebuilt binary (macOS arm64)
+# https://github.com/.../releases/tag/latest
 ```
+
+---
+
+## Tests
+
+```sh
+make test
+```
+
+Tests cover panels, forms, plots, and the tool registry — no GL context needed.
 
 ---
 

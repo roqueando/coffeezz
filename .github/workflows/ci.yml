@@ -2,10 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
-    tags: ['v*']
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
 
 jobs:
 
@@ -19,14 +18,14 @@ jobs:
       - name: Install GLFW
         run: brew install glfw
 
-      - name: Build
-        run: make clean && make
+      - name: Build (release)
+        run: make release
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: coffeez-macos
-          path: coffeez
+          path: dist/release/coffeez
 
   # ── Test ───────────────────────────────────────────────────────────
   test:
@@ -41,12 +40,14 @@ jobs:
       - name: Run tests
         run: make test
 
-  # ── Release ────────────────────────────────────────────────────────
+  # ── Release (rolling "latest" on every main push) ──────────────────
   release:
     name: Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/main'
     needs: [build, test]
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -54,14 +55,25 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: coffeez-macos
+          path: dist/release
 
       - name: Make executable
-        run: chmod +x coffeez
+        run: chmod +x dist/release/coffeez
 
-      - name: Create GitHub Release
+      - name: Force-push rolling 'latest' tag
+        run: |
+          git config user.name  "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag -f latest
+          git push -f origin latest
+
+      - name: Publish rolling GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: coffeez
-          generate_release_notes: true
+          tag_name: latest
+          name: "Latest Build"
+          body: "Rolling release — always the latest commit on `main`."
+          files: dist/release/coffeez
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

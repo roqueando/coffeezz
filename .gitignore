@@ -1,1 +1,3 @@
 coffeezz
+build/*
+dist/*
