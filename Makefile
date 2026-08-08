@@ -37,14 +37,14 @@ TEST_OBJS = $(TEST_NK_IMPL:.c=.o) $(TEST_UI_INFRA:.c=.o) $(TEST_REGISTRY:.c=.o)
 # ---- Targets ----------------------------------------------------------
 .PHONY: all clean test debug release run/debug
 
-run/debug: debug
-	@./$(DIST_D)/$(BINARY)
-
 all: debug
 
 debug: $(DIST_D)/$(BINARY)
 
 release: $(DIST_R)/$(BINARY)
+
+run/debug: debug
+	@./$(DIST_D)/$(BINARY)
 
 # ---- Debug binary ----------------------------------------------------
 $(DIST_D)/$(BINARY): $(OBJS_D)
