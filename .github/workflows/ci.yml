@@ -24,8 +24,8 @@ jobs:
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: coffeez-macos
-          path: dist/release/coffeez
+          name: coffeezz-macos
+          path: dist/release/coffeezz
 
   # ── Test ───────────────────────────────────────────────────────────
   test:
@@ -54,11 +54,11 @@ jobs:
       - name: Download binary artifact
         uses: actions/download-artifact@v4
         with:
-          name: coffeez-macos
+          name: coffeezz-macos
           path: dist/release
 
       - name: Make executable
-        run: chmod +x dist/release/coffeez
+        run: chmod +x dist/release/coffeezz
 
       - name: Force-push rolling 'latest' tag
         run: |
@@ -73,7 +73,7 @@ jobs:
           tag_name: latest
           name: "Latest Build"
           body: "Rolling release — always the latest commit on `main`."
-          files: dist/release/coffeez
+          files: dist/release/coffeezz
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

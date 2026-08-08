@@ -16,7 +16,7 @@ REL_DIR   = build/release
 DIST_D    = dist/debug
 DIST_R    = dist/release
 
-BINARY = coffeez
+BINARY = coffeezz
 
 # ---- Main app sources -------------------------------------------------
 TOOL_SRCS = $(wildcard tools/*.c) $(wildcard tools/*/*.c)
