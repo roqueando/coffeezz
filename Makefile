@@ -16,7 +16,7 @@ REL_DIR   = build/release
 DIST_D    = dist/debug
 DIST_R    = dist/release
 
-BINARY = coffeezz
+BINARY = coffeez
 
 # ---- Main app sources -------------------------------------------------
 TOOL_SRCS = $(wildcard tools/*.c) $(wildcard tools/*/*.c)
@@ -35,7 +35,10 @@ TEST_REGISTRY   = $(TEST_DIR)/test_tool_registry.c
 TEST_OBJS = $(TEST_NK_IMPL:.c=.o) $(TEST_UI_INFRA:.c=.o) $(TEST_REGISTRY:.c=.o)
 
 # ---- Targets ----------------------------------------------------------
-.PHONY: all clean test debug release
+.PHONY: all clean test debug release run/debug
+
+run/debug: debug
+	@./$(DIST_D)/$(BINARY)
 
 all: debug
 
