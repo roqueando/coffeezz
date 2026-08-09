@@ -3,9 +3,6 @@
  *
  * All inputs accept SI‑unit suffixes (e.g.  "10n" = 10e-9,  "1k" = 1000).
  * Supported prefixes: f p n u m  k/K M G
- *
- * Two‑column layout:  left  = parameter inputs
- *                      right = live waveform plot + SPICE output
  */
 #include "nuklear.h"
 #include "ui_infra.h"
@@ -35,14 +32,6 @@ static char g_buf_ncycles[32];
 
 /* Computed SPICE string */
 static char g_spice_str[256];
-
-/* Waveform plot */
-static ui_plot g_plot;
-
-/* Snapshot for change detection → auto‑regenerate waveform */
-static float g_snap_vlow, g_snap_vhigh, g_snap_freq, g_snap_duty;
-static float g_snap_tr, g_snap_tf, g_snap_td;
-static int   g_snap_ncycles;
 
 /* ================================================================== */
 /*  SI‑unit helpers                                                    */
@@ -130,75 +119,6 @@ static void recompute_spice(void)
 }
 
 /* ================================================================== */
-/*  Waveform generation                                                */
-/* ================================================================== */
-
-/* Evaluate the ideal PWM waveform at time t (seconds). */
-static float pwm_sample(float t, float period, float tr, float tf,
-                        float pw_flat, float vlow, float vhigh)
-{
-    if (t < g_td) return vlow;
-
-    float tp = fmodf(t - g_td, period);
-    if (tp < tr)
-        return vlow + (vhigh - vlow) * (tp / tr);             /* rising edge  */
-    if (tp < tr + pw_flat)
-        return vhigh;                                          /* flat top     */
-    if (tp < tr + pw_flat + tf)
-        return vhigh - (vhigh - vlow) * ((tp - tr - pw_flat) / tf);   /* falling edge */
-    return vlow;                                               /* low hold     */
-}
-
-static void regenerate_waveform(void)
-{
-    float period  = 1.0f / g_freq;
-    float ton_raw = (g_duty / 100.0f) * period;
-    float pw_flat = ton_raw - g_tr;
-    if (pw_flat < 0.0f) pw_flat = 0.0f;
-
-    float total_t = g_td + (float)g_ncycles * period;
-    if (total_t <= 0.0f) total_t = 1e-9f;
-
-    /* reset the plot ring‑buffer */
-    g_plot.head  = 0;
-    g_plot.count = 0;
-    g_plot.min_val = 0.0f;
-    g_plot.max_val = 0.0f;
-
-    int N = g_ncycles * 500;
-    if (N < 2)  N = 2;
-    if (N > UI_PLOT_MAX_POINTS) N = UI_PLOT_MAX_POINTS;
-
-    for (int i = 0; i < N; i++) {
-        float t = total_t * (float)i / (float)(N - 1);
-        ui_plot_push(&g_plot,
-            pwm_sample(t, period, g_tr, g_tf, pw_flat, g_vlow, g_vhigh));
-    }
-
-    ui_plot_set_x_range(&g_plot, 0.0f, total_t);
-    g_plot.x_label = "Time (s)";
-    g_plot.y_label = "Voltage (V)";
-
-    /* Update snapshot so we don't regenerate every frame */
-    g_snap_vlow    = g_vlow;
-    g_snap_vhigh   = g_vhigh;
-    g_snap_freq    = g_freq;
-    g_snap_duty    = g_duty;
-    g_snap_tr      = g_tr;
-    g_snap_tf      = g_tf;
-    g_snap_td      = g_td;
-    g_snap_ncycles = g_ncycles;
-}
-
-static int params_changed(void)
-{
-    return g_vlow    != g_snap_vlow    || g_vhigh != g_snap_vhigh ||
-           g_freq    != g_snap_freq    || g_duty  != g_snap_duty  ||
-           g_tr      != g_snap_tr      || g_tf    != g_snap_tf    ||
-           g_td      != g_snap_td      || g_ncycles != g_snap_ncycles;
-}
-
-/* ================================================================== */
 /*  Draw‑callback macros                                               */
 /* ================================================================== */
 
@@ -226,7 +146,7 @@ static void pwm_spice_gen_draw(struct nk_context *ctx, ui_panel *pnl)
 {
     tool_registry_check_close(ctx, pnl);
 
-    /* ── Parse all text fields into floats ──────────────────────── */
+    /* Parse all text fields into floats */
     g_vlow    = si_to_float(g_buf_vlow,    g_vlow);
     g_vhigh   = si_to_float(g_buf_vhigh,   g_vhigh);
     g_freq    = si_to_float(g_buf_freq,    g_freq);
@@ -245,13 +165,9 @@ static void pwm_spice_gen_draw(struct nk_context *ctx, ui_panel *pnl)
     if (g_td    < 0.0f)    g_td    = 0.0f;
     if (g_ncycles < 1)     g_ncycles = 1;
 
-    /* Regenerate waveform on change */
-    if (params_changed())
-        regenerate_waveform();
-
     recompute_spice();
 
-    /* ── Parameters (top) ───────────────────────────────────────── */
+    /* ── Parameters ─────────────────────────────────────────────── */
     nk_layout_row_dynamic(ctx, 22, 1);
     nk_label(ctx, "PWM PARAMETERS  (SI prefixes: f p n u m k M G)", NK_TEXT_CENTERED);
 
@@ -266,20 +182,6 @@ static void pwm_spice_gen_draw(struct nk_context *ctx, ui_panel *pnl)
 
     /* ── Spacer ─────────────────────────────────────────────────── */
     nk_layout_row_dynamic(ctx, 10, 1);
-    nk_spacing(ctx, 1);
-
-    /* ── Waveform plot (bottom) ─────────────────────────────────── */
-    nk_layout_row_dynamic(ctx, 22, 1);
-    nk_label(ctx, "PWM WAVEFORM", NK_TEXT_CENTERED);
-
-    nk_layout_row_dynamic(ctx, 200, 1);
-    ui_plot_render(ctx, &g_plot);
-
-    nk_layout_row_dynamic(ctx, 20, 1);
-    nk_label(ctx, "Time  ──▶", NK_TEXT_CENTERED);
-
-    /* ── Spacer ─────────────────────────────────────────────────── */
-    nk_layout_row_dynamic(ctx, 6, 1);
     nk_spacing(ctx, 1);
 
     /* ── SPICE output ───────────────────────────────────────────── */
@@ -313,21 +215,6 @@ void pwm_spice_gen_register(ui_panel **head, int sidebar_w,
     float_to_si(g_tf,      g_buf_tf,      sizeof(g_buf_tf));
     float_to_si(g_td,      g_buf_td,      sizeof(g_buf_td));
     snprintf(g_buf_ncycles, sizeof(g_buf_ncycles), "%d", g_ncycles);
-
-    /* Initialise the plot */
-    ui_plot_init(&g_plot, "PWM Waveform", NK_CHART_LINES);
-    g_plot.use_custom_colors = nk_true;
-    g_plot.line_color        = nk_rgb(255, 180, 30);  /* orange */
-
-    /* Invalidate snapshot so first draw regenerates */
-    g_snap_vlow    = -1e30f;
-    g_snap_vhigh   = -1e30f;
-    g_snap_freq    = -1e30f;
-    g_snap_duty    = -1e30f;
-    g_snap_tr      = -1e30f;
-    g_snap_tf      = -1e30f;
-    g_snap_td      = -1e30f;
-    g_snap_ncycles = -1;
 
     tool_desc desc = {
         .button_label = "PWM Spice GEN",
